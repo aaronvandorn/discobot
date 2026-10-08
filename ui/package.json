@@ -1,7 +1,7 @@
 {
-  "name": "@discord-synth/ui",
+  "name": "@discobot/ui",
   "version": "1.0.0",
-  "description": "Web UI for synth sequencer",
+  "description": "Discobot browser app",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
   "dependencies": {
     "@tonejs/midi": "^2.0.28",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@discobot/engine": "*"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",

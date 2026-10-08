@@ -1,18 +1,14 @@
 {
-  "name": "@discord-synth/engine",
+  "name": "@discobot/engine",
   "version": "1.0.0",
-  "description": "Audio synthesis engine for Discord synth bot",
+  "description": "Math-based audio synthesis engine for Discobot",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
-  "dependencies": {
-    "node-web-audio-api": "^2.0.0"
-  },
   "devDependencies": {
-    "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }
 }

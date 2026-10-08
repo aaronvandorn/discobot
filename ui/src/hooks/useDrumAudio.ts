@@ -5,7 +5,7 @@
 
 import { useRef } from 'react';
 import { DrumInstrument, DrumSettings } from '../types';
-import { DrumSynthesizer } from '@discord-synth/engine';
+import { DrumSynthesizer } from '@discobot/engine';
 
 export function useDrumAudio() {
   const audioCtxRef = useRef<AudioContext | null>(null);

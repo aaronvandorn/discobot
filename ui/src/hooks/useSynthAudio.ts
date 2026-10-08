@@ -72,7 +72,7 @@ export function useSynthAudio() {
       if (ctx.state === 'suspended') {
         await ctx.resume();
       }
-      await ctx.audioWorklet.addModule('/synth-processor.js');
+      await ctx.audioWorklet.addModule(`${import.meta.env.BASE_URL}synth-processor.js`);
       const node = new AudioWorkletNode(ctx, 'synth-processor', {
         numberOfOutputs: 1,
         outputChannelCount: [2],

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 1. Start app: `npm run dev`
-2. Open UI and complete Discord `/login` flow.
+2. Open the UI (dev server or deployed site) and click once to unlock audio.
 3. Ensure at least one synth lane is visible.
 
 ## 1) Undo/Redo

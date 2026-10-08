@@ -1,6 +1,6 @@
 # AI PR Review Guide
 
-Expert-level code review framework for the Discord Synth Bot project.
+Expert-level code review framework for Discobot, the browser-based synth/sequencer/drum machine.
 
 ## Review Principles
 
@@ -14,13 +14,11 @@ Expert-level code review framework for the Discord Synth Bot project.
 
 ```
 discobot/
-├── bot/       Discord bot (discord.js v14, @discordjs/voice)
-├── engine/    Custom math synthesis, types, streaming renderer
-├── web/       Express API (3001) + WebSocket (3001/ws)
-└── ui/        React + Vite (3000)
+├── engine/    Custom math synthesis, types (no Node/DOM deps)
+└── ui/        React + Vite (3000); ui/src/localBackend.ts holds app state
 ```
 
-**Data flow**: Engine types → Web server (state + REST) → WebSocket → UI + Bot
+**Data flow**: Engine types → `LocalBackend` (state + `apiFetch` routes, local storage) → event messages → UI
 
 ## Review Checklist
 
@@ -92,7 +90,7 @@ discobot/
 - [ ] React state updates use functional form when depending on previous state
 - [ ] Refs used for values accessed inside callbacks or effects
 - [ ] Cleanup functions returned from useEffect hooks
-- [ ] WebSocket handlers check `session.guildId` before broadcasting
+- [ ] New state changes go through a `LocalBackend` route and emit an event the UI handles
 
 ### 8. Testing Considerations
 
@@ -100,14 +98,14 @@ discobot/
 - [ ] Does `npm run build` pass without errors?
 - [ ] Does `tsc --noEmit` pass for all workspaces?
 - [ ] Are there obvious scenarios that would break the change?
-- [ ] Does the change affect Discord bot playback behavior?
+- [ ] Does the change keep saved patterns / the autosaved session in local storage loadable?
 
 ## Known Issues to Watch For
 
 These are recurring problems in this codebase:
 
 1. **Stale closures** — React callbacks capturing stale state. Use refs for values that change.
-2. **WebSocket type drift** — Server and client message types must stay in sync.
+2. **Event type drift** — `LocalBackend` event payloads and `App.tsx` `handleMessage` must stay in sync.
 3. **AudioContext suspension** — Chrome requires resume() in user gesture. Use tryResume().
 4. **Double saturation** — Drum FX sends carry post-processed signal through shared FX loop.
 5. **Synth insert bypass** — Browser insert effects are bypassed during pattern rendering by design.

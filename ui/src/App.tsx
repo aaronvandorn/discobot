@@ -6,48 +6,17 @@ import DrumMachine from './components/DrumMachine';
 import EffectsPanel from './components/EffectsPanel';
 import MixerPanel from './components/MixerPanel';
 import MidiPanel from './components/MidiPanel';
-import { useWebSocket } from './hooks/useWebSocket';
+import { useLocalBackend } from './hooks/useLocalBackend';
 import { useSynthAudio } from './hooks/useSynthAudio';
 import { useDrumAudio } from './hooks/useDrumAudio';
 import { usePatternAudio } from './hooks/usePatternAudio';
 import { MidiMode, MidiMessage, useMidiInput } from './hooks/useMidiInput';
-import { getWebSocketUrl } from './config';
 import { Pattern, SynthParameters, SavedPatternInfo, SavedPatternFull, SavedSynthData, DrumState, DrumInstrument, DrumSettings, DrumKitDefinition, DrumKitId, EffectsLoopState, FxSendLevels, SynthModelId, SynthModelParams } from './types';
-import { authFetch, exchangeLoginToken, fetchSessionInfo, setAuthContext, compatibilityLogin } from './authClient';
+import { apiFetch, downloadWav } from './localBackend';
 import { downloadMidiFile, transposeNote } from './utils/midiExport';
 import { importMidiFile, readFileAsArrayBuffer, MidiImportResult } from './utils/midiImport';
 import { DEFAULT_SYNTH_MODEL_ID, createDefaultSynthModelParams, mapSynthModelToEngineParams, normalizeSynthModelId, normalizeSynthModelParams } from './synthModels';
 import './App.css';
-
-const SESSION_TOKEN_STORAGE_KEY = 'discobot_session_token';
-const CSRF_TOKEN_STORAGE_KEY = 'discobot_csrf_token';
-
-function writeAuthTokens(sessionToken: string, csrfToken: string) {
-  sessionStorage.setItem(SESSION_TOKEN_STORAGE_KEY, sessionToken);
-  sessionStorage.setItem(CSRF_TOKEN_STORAGE_KEY, csrfToken);
-}
-
-function clearAuthTokens() {
-  sessionStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
-  sessionStorage.removeItem(CSRF_TOKEN_STORAGE_KEY);
-  localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
-  localStorage.removeItem(CSRF_TOKEN_STORAGE_KEY);
-}
-
-function readAuthTokens() {
-  const sessionToken = sessionStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
-  const csrfToken = sessionStorage.getItem(CSRF_TOKEN_STORAGE_KEY);
-  if (sessionToken && csrfToken) return { sessionToken, csrfToken };
-  const migratedSessionToken = localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
-  const migratedCsrfToken = localStorage.getItem(CSRF_TOKEN_STORAGE_KEY);
-  if (migratedSessionToken && migratedCsrfToken) {
-    writeAuthTokens(migratedSessionToken, migratedCsrfToken);
-    localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
-    localStorage.removeItem(CSRF_TOKEN_STORAGE_KEY);
-    return { sessionToken: migratedSessionToken, csrfToken: migratedCsrfToken };
-  }
-  return null;
-}
 
 const DEFAULT_PARAMS: SynthParameters = {
   hold: false,
@@ -583,8 +552,7 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
           <section>
             <h3>Quick start</h3>
             <ol className="help-list">
-              <li>Run <strong>/login</strong> in Discord and open the generated link.</li>
-              <li>Use <strong>/join</strong> in Discord to route playback to your voice channel.</li>
+              <li>Click anywhere once so the browser allows audio, and check the speaker icon isn't muted.</li>
               <li>Pick a step on a synth lane, then click a key (or paint in Piano Roll) to place notes.</li>
               <li>Program drum hits in <strong>Rhythm Composer</strong>, choose a kit, and shape tone/volume/extra per lane.</li>
               <li>Press <strong>Play All</strong> to start and <strong>Stop All</strong> to stop.</li>
@@ -641,11 +609,6 @@ function App() {
   const [browserMuted, setBrowserMuted] = useState(false);
   const [browserVolume, setBrowserVolume] = useState(1.0);
   const [globalTempo, setGlobalTempo] = useState(120);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [csrfToken, setCsrfToken] = useState<string | null>(null);
-  const [sessionLabel, setSessionLabel] = useState('Unauthenticated');
-  const [connectedUsers, setConnectedUsers] = useState<string[]>([]);
-  const [authError, setAuthError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [midiMode, setMidiMode] = useState<MidiMode>('live');
   const [midiChannel, setMidiChannel] = useState(1);
@@ -807,17 +770,17 @@ function App() {
     setGlobalTempo(snapshot.tempo);
     setActiveSavedPattern(null);
     await Promise.all([
-      authFetch(`/synth/${synthId}/patterns/${snapshot.pattern.id}`, {
+      apiFetch(`/synth/${synthId}/patterns/${snapshot.pattern.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(snapshot.pattern),
       }),
-      authFetch(`/synth/${synthId}/parameters`, {
+      apiFetch(`/synth/${synthId}/parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(snapshot.synthParams || DEFAULT_PARAMS),
       }),
-      authFetch(`/synth/${synthId}/model`, {
+      apiFetch(`/synth/${synthId}/model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -825,12 +788,12 @@ function App() {
           modelParams: snapshot.synthModelParams,
         }),
       }),
-      authFetch('/drum/state', {
+      apiFetch('/drum/state', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: snapshot.drumState }),
       }),
-      authFetch('/tempo', {
+      apiFetch('/tempo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tempo: snapshot.tempo }),
@@ -895,64 +858,6 @@ function App() {
       isRestoringRef.current = false;
     }
   }, [resolveHistoryTarget, getSnapshot, applySnapshot]);
-
-  const handleUnauthorized = useCallback(() => {
-    setSessionToken(null);
-    setCsrfToken(null);
-    setSessionLabel('Session expired');
-    setAuthError('Session expired or unauthorized. Use /login in Discord to reconnect.');
-    clearAuthTokens();
-  }, []);
-
-  useEffect(() => {
-    setAuthContext(sessionToken, csrfToken, handleUnauthorized);
-  }, [sessionToken, csrfToken, handleUnauthorized]);
-
-  useEffect(() => {
-    const initializeAuth = async () => {
-      const params = new URLSearchParams(window.location.search);
-      const loginToken = params.get('loginToken');
-      try {
-        if (loginToken) {
-          const data = await exchangeLoginToken(loginToken);
-          const nextSessionToken = data.sessionToken as string;
-          const nextCsrfToken = data.csrfToken as string;
-          setSessionToken(nextSessionToken);
-          setCsrfToken(nextCsrfToken);
-          setSessionLabel(`${data.session.username} (${data.session.role})`);
-          writeAuthTokens(nextSessionToken, nextCsrfToken);
-          params.delete('loginToken');
-          const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
-          window.history.replaceState({}, '', nextUrl);
-          return;
-        }
-
-        const storedAuth = readAuthTokens();
-        if (storedAuth) {
-          const data = await fetchSessionInfo(storedAuth.sessionToken);
-          setSessionToken(storedAuth.sessionToken);
-          setCsrfToken(storedAuth.csrfToken);
-          setSessionLabel(`${data.session.username} (${data.session.role})`);
-          return;
-        }
-
-        setAuthError('Use /login in Discord to link this browser session.');
-        try {
-          const compatData = await compatibilityLogin();
-          setSessionToken(compatData.sessionToken);
-          setCsrfToken(compatData.csrfToken);
-          setSessionLabel('Local User (owner)');
-          writeAuthTokens(compatData.sessionToken, compatData.csrfToken);
-          setAuthError(null);
-          return;
-        } catch {
-        }
-      } catch {
-        setAuthError('Login token invalid or expired. Run /login in Discord again.');
-      }
-    };
-    void initializeAuth();
-  }, []);
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -1098,7 +1003,8 @@ function App() {
         if (message.data.drumFx) setDrumFx(normalizeDrumFx(message.data.drumFx));
         if (message.data.effectsLoop) setEffectsLoop(normalizeEffectsLoop(message.data.effectsLoop));
         if (message.data.tempo) setGlobalTempo(message.data.tempo);
-        if (Array.isArray(message.data.connectedUsers)) setConnectedUsers(message.data.connectedUsers);
+        if (typeof message.data.drumMasterVolume === 'number') setDrumMasterVolume(message.data.drumMasterVolume);
+        if (typeof message.data.drumSwing === 'number') setDrumSwing(message.data.drumSwing);
         break;
       }
       case 'synthUpdate': {
@@ -1327,20 +1233,16 @@ function App() {
         if (message.data.effectsLoop) setEffectsLoop(normalizeEffectsLoop(message.data.effectsLoop));
         break;
       }
-      case 'connectedUsers': {
-        if (Array.isArray(message.data.users)) setConnectedUsers(message.data.users);
-        break;
-      }
     }
   }, [synthAudio, drumAudio, triggerSynthNote, globalTempo, patternAudio]);
 
-  const connected = useWebSocket(sessionToken ? getWebSocketUrl(sessionToken) : null, handleMessage);
+  useLocalBackend(handleMessage);
 
 
   const handleRemoveSynth = useCallback(async (synthId: number) => {
     if (synthId === 1) return;
     try {
-      await authFetch(`/synth/${synthId}`, { method: 'DELETE' });
+      await apiFetch(`/synth/${synthId}`, { method: 'DELETE' });
       setSynths(prev => prev.filter(s => s.id !== synthId));
     } catch (error) {
       console.error('Failed to remove synth:', error);
@@ -1351,7 +1253,7 @@ function App() {
     if (synthsRef.current.some(s => s.id === synthId)) return true;
     if (synthId < 2 || synthId > 3) return false;
     try {
-      const res = await authFetch('/synth/create', {
+      const res = await apiFetch('/synth/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ synthId }),
@@ -1402,7 +1304,7 @@ function App() {
       s.pattern ? { ...s, pattern: { ...s.pattern, tempo: bpm } } : s
     ));
 
-    await authFetch('/tempo', {
+    await apiFetch('/tempo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tempo: bpm }),
@@ -1421,7 +1323,7 @@ function App() {
         patternAudio.ensureAudioReady(),
       ]);
       const playResponses = await Promise.all(playableSynths.map(async (s) => {
-        const response = await authFetch('/sequencer/play', {
+        const response = await apiFetch('/sequencer/play', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ synthId: s.id, patternId: s.pattern!.id }),
@@ -1461,7 +1363,7 @@ function App() {
 
     const playingSynthIds = currentSynths.filter(s => s.isPlaying).map((s) => s.id);
     await Promise.all(currentSynths.filter(s => s.isPlaying).map(s =>
-      authFetch('/sequencer/stop', {
+      apiFetch('/sequencer/stop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ synthId: s.id }),
@@ -1515,7 +1417,7 @@ function App() {
       )));
       clearActiveSavedPattern();
 
-      await authFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
+      await apiFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedPattern),
@@ -1552,7 +1454,7 @@ function App() {
     )));
     clearActiveSavedPattern();
 
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPattern),
@@ -1571,7 +1473,7 @@ function App() {
       s.id === synthId ? { ...s, pattern: updatedPattern, selectedStep: null } : s
     )));
     clearActiveSavedPattern();
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPattern),
@@ -1598,7 +1500,7 @@ function App() {
     }));
     clearActiveSavedPattern();
 
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPattern),
@@ -1627,7 +1529,7 @@ function App() {
     ));
     clearActiveSavedPattern();
 
-    await authFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
@@ -1682,7 +1584,7 @@ function App() {
   const handleParameterChange = useCallback(async (synthId: number, params: Partial<SynthParameters>) => {
     const synth = synthsRef.current.find((entry) => entry.id === synthId);
     if (synth?.pattern) pushHistorySnapshotThrottled(synthId, synth.pattern.id, `synth-params-${synthId}`);
-    await authFetch(`/synth/${synthId}/parameters`, {
+    await apiFetch(`/synth/${synthId}/parameters`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
@@ -1712,7 +1614,7 @@ function App() {
         }
         : entry
     )));
-    await authFetch(`/synth/${synthId}/model`, {
+    await apiFetch(`/synth/${synthId}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1722,7 +1624,7 @@ function App() {
     });
     const mapped = mapSynthModelToEngineParams(normalizedModelId, normalizedModelParams);
     if (Object.keys(mapped).length > 0) {
-      await authFetch(`/synth/${synthId}/parameters`, {
+      await apiFetch(`/synth/${synthId}/parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mapped),
@@ -1755,7 +1657,7 @@ function App() {
     }));
     clearActiveSavedPattern();
 
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(nextPattern),
@@ -1777,7 +1679,7 @@ function App() {
       entry.id === synthId ? { ...entry, pattern: nextPattern } : entry
     )));
     clearActiveSavedPattern();
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(nextPattern),
@@ -1788,7 +1690,7 @@ function App() {
     setSynths(prev => prev.map(s =>
       s.id === synthId ? { ...s, ...mix } : s
     ));
-    await authFetch(`/synth/${synthId}/mix`, {
+    await apiFetch(`/synth/${synthId}/mix`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mix),
@@ -1811,7 +1713,7 @@ function App() {
         synthModelParams: s.synthModelParams,
       }));
 
-    const saveRequest = async (overwriteId?: string) => authFetch('/patterns/save', {
+    const saveRequest = async (overwriteId?: string) => apiFetch('/patterns/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1856,7 +1758,7 @@ function App() {
   const refreshSavedPatterns = useCallback(async () => {
     setLoadingSavedPatterns(true);
     try {
-      const res = await authFetch('/patterns/saved');
+      const res = await apiFetch('/patterns/saved');
       if (res.ok) {
         const data: SavedPatternInfo[] = await res.json();
         setSavedPatterns(data);
@@ -1943,7 +1845,7 @@ function App() {
     if (!midiImportData) return;
     const tempo = midiImportData.detectedTempo;
     setGlobalTempo(tempo);
-    void authFetch('/tempo', {
+    void apiFetch('/tempo', {
       method: 'PUT',
       body: JSON.stringify({ tempo }),
     });
@@ -1960,7 +1862,7 @@ function App() {
       setSynths(prev => prev.map(s =>
         s.id === synthId ? { ...s, pattern } : s
       ));
-      void authFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
+      void apiFetch(`/synth/${synthId}/patterns/${pattern.id}`, {
         method: 'PUT',
         body: JSON.stringify(pattern),
       });
@@ -1979,17 +1881,15 @@ function App() {
   }, [handleSavePattern, refreshSavedPatterns]);
 
   useEffect(() => {
-    if (!sessionToken) return;
     void refreshSavedPatterns();
-  }, [sessionToken, refreshSavedPatterns]);
+  }, [refreshSavedPatterns]);
 
   useEffect(() => {
-    if (!sessionToken) return;
     const fetchDrumKits = async () => {
       setDrumKitsLoading(true);
       setDrumKitsError(null);
       try {
-        const res = await authFetch('/drum/kits');
+        const res = await apiFetch('/drum/kits');
         if (!res.ok) {
           setDrumKitsError('Unable to load drum kits.');
           return;
@@ -2009,7 +1909,7 @@ function App() {
       }
     };
     void fetchDrumKits();
-  }, [sessionToken]);
+  }, []);
 
   const handleLoadSavedPattern = useCallback(async (
     synthId: number,
@@ -2029,7 +1929,7 @@ function App() {
 
     if (data.drumKitId) {
       setSelectedDrumKitId(data.drumKitId);
-      await authFetch('/drum/kit', {
+      await apiFetch('/drum/kit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kitId: data.drumKitId, applyDefaults: false }),
@@ -2037,7 +1937,7 @@ function App() {
     }
     if (data.drumState) {
       setDrumState(data.drumState);
-      await authFetch('/drum/state', {
+      await apiFetch('/drum/state', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: data.drumState }),
@@ -2045,7 +1945,7 @@ function App() {
     }
     if (data.drumMasterVolume !== undefined) {
       setDrumMasterVolume(data.drumMasterVolume);
-      await authFetch('/drum/master-volume', {
+      await apiFetch('/drum/master-volume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ volume: data.drumMasterVolume }),
@@ -2053,7 +1953,7 @@ function App() {
     }
     if (data.drumSwing !== undefined) {
       setDrumSwing(data.drumSwing);
-      await authFetch('/drum/swing', {
+      await apiFetch('/drum/swing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ swing: data.drumSwing }),
@@ -2062,7 +1962,7 @@ function App() {
     if (data.drumFx) {
       const nextDrumFx = normalizeDrumFx(data.drumFx);
       setDrumFx(nextDrumFx);
-      await authFetch('/drum/fx', {
+      await apiFetch('/drum/fx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDrumFx),
@@ -2071,7 +1971,7 @@ function App() {
     if (data.effectsLoop) {
       const nextEffectsLoop = normalizeEffectsLoop(data.effectsLoop);
       setEffectsLoop(nextEffectsLoop);
-      await authFetch('/effects-loop', {
+      await apiFetch('/effects-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextEffectsLoop),
@@ -2088,7 +1988,7 @@ function App() {
         }
         : entry
     )));
-    await authFetch(`/synth/${synthId}/model`, {
+    await apiFetch(`/synth/${synthId}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2097,13 +1997,13 @@ function App() {
       }),
     });
     if (data.synthParams) {
-      await authFetch(`/synth/${synthId}/parameters`, {
+      await apiFetch(`/synth/${synthId}/parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(normalizeSynthParams(data.synthParams)),
       });
     }
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
@@ -2130,19 +2030,19 @@ function App() {
     setSynths(prev => prev.map(entry =>
       entry.id === synthId ? { ...entry, synthModelId: nextModelId, synthModelParams: nextModelParams } : entry
     ));
-    await authFetch(`/synth/${synthId}/model`, {
+    await apiFetch(`/synth/${synthId}/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelId: nextModelId, modelParams: nextModelParams }),
     });
     if (saved.synthParams) {
-      await authFetch(`/synth/${synthId}/parameters`, {
+      await apiFetch(`/synth/${synthId}/parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(normalizeSynthParams(saved.synthParams)),
       });
     }
-    await authFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
+    await apiFetch(`/synth/${synthId}/patterns/${synth.pattern.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
@@ -2153,7 +2053,7 @@ function App() {
     const targetSynthId = synthsRef.current[0]?.id;
     if (!targetSynthId) return;
     try {
-      const res = await authFetch(`/patterns/saved/${savedId}`);
+      const res = await apiFetch(`/patterns/saved/${savedId}`);
       if (!res.ok) return;
       const data: SavedPatternFull = await res.json();
       await handleLoadSavedPattern(targetSynthId, data, { id: savedId, name: data.name });
@@ -2176,7 +2076,7 @@ function App() {
   const handleDrumKitChange = useCallback(async (kitId: DrumKitId, applyDefaults: boolean): Promise<DrumState | undefined> => {
     setSelectedDrumKitId(kitId);
     try {
-      const res = await authFetch('/drum/kit', {
+      const res = await apiFetch('/drum/kit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kitId, applyDefaults }),
@@ -2203,7 +2103,7 @@ function App() {
       next[instrument].steps[step] = active;
       return next;
     });
-    authFetch('/drum/step', {
+    apiFetch('/drum/step', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instrument, step, active }),
@@ -2218,7 +2118,7 @@ function App() {
       next[instrument].stepVelocities![step] = velocity;
       return next;
     });
-    authFetch('/drum/step-velocity', {
+    apiFetch('/drum/step-velocity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instrument, step, velocity }),
@@ -2235,7 +2135,7 @@ function App() {
       next[instrument] = { ...next[instrument], settings: { ...next[instrument].settings, ...settings } };
       return next;
     });
-    authFetch('/drum/settings', {
+    apiFetch('/drum/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instrument, settings }),
@@ -2250,7 +2150,7 @@ function App() {
       next[instrument] = { ...next[instrument], ...mix };
       return next;
     });
-    authFetch('/drum/mix', {
+    apiFetch('/drum/mix', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instrument, ...mix }),
@@ -2259,14 +2159,14 @@ function App() {
 
   const handleDrumReset = useCallback(() => {
     setDrumState(createDefaultDrumState());
-    authFetch('/drum/reset', { method: 'POST' });
+    apiFetch('/drum/reset', { method: 'POST' });
   }, []);
 
   const handleDrumMasterVolumeChange = useCallback((volume: number) => {
     const synth = synthsRef.current[0];
     if (synth?.pattern) pushHistorySnapshotThrottled(synth.id, synth.pattern.id, 'drum-master-volume', 300);
     setDrumMasterVolume(volume);
-    authFetch('/drum/master-volume', {
+    apiFetch('/drum/master-volume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ volume }),
@@ -2277,7 +2177,7 @@ function App() {
     const synth = synthsRef.current[0];
     if (synth?.pattern) pushHistorySnapshotThrottled(synth.id, synth.pattern.id, 'drum-swing', 300);
     setDrumSwing(swing);
-    authFetch('/drum/swing', {
+    apiFetch('/drum/swing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ swing }),
@@ -2295,7 +2195,7 @@ function App() {
     setDrumFx(updated);
     void (async () => {
       try {
-        const res = await authFetch('/drum/fx', {
+        const res = await apiFetch('/drum/fx', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated),
@@ -2325,7 +2225,7 @@ function App() {
     setEffectsLoop(updated);
     void (async () => {
       try {
-        const res = await authFetch('/effects-loop', {
+        const res = await apiFetch('/effects-loop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated),
@@ -2361,7 +2261,7 @@ function App() {
       ])
     ) as DrumState;
     setDrumState(nextState);
-    authFetch('/drum/state', {
+    apiFetch('/drum/state', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ state: nextState }),
@@ -2376,7 +2276,7 @@ function App() {
       ])
     ) as DrumState;
     setDrumState(nextState);
-    authFetch('/drum/state', {
+    apiFetch('/drum/state', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ state: nextState }),
@@ -2388,12 +2288,12 @@ function App() {
     arpTimeoutsRef.current = [];
     const currentSynths = synthsRef.current;
     for (const synth of currentSynths) {
-      await authFetch(`/synth/${synth.id}/parameters`, {
+      await apiFetch(`/synth/${synth.id}/parameters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(DEFAULT_PARAMS),
       });
-      await authFetch(`/synth/${synth.id}/model`, {
+      await apiFetch(`/synth/${synth.id}/model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2401,7 +2301,7 @@ function App() {
           modelParams: createDefaultSynthModelParams(),
         }),
       });
-      await authFetch(`/synth/${synth.id}/mix`, {
+      await apiFetch(`/synth/${synth.id}/mix`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ muted: false, solo: false }),
@@ -2411,14 +2311,14 @@ function App() {
           ...synth.pattern,
           steps: synth.pattern.steps.map(s => ({ ...s, active: false, note: undefined })),
         };
-        await authFetch(`/synth/${synth.id}/patterns/${synth.pattern.id}`, {
+        await apiFetch(`/synth/${synth.id}/patterns/${synth.pattern.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(cleared),
         });
       }
       if (synth.isPlaying) {
-        await authFetch('/sequencer/stop', {
+        await apiFetch('/sequencer/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ synthId: synth.id }),
@@ -2443,13 +2343,13 @@ function App() {
       forceReleaseSignal: !s.forceReleaseSignal,
     })));
     setDrumFx(DEFAULT_DRUM_FX);
-    void authFetch('/drum/fx', {
+    void apiFetch('/drum/fx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(DEFAULT_DRUM_FX),
     });
     setEffectsLoop(DEFAULT_EFFECTS_LOOP);
-    void authFetch('/effects-loop', {
+    void apiFetch('/effects-loop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(DEFAULT_EFFECTS_LOOP),
@@ -2532,10 +2432,7 @@ function App() {
             </button>
             <button
               className="header-secondary-button"
-              onClick={() => {
-                const url = new URL('/export/wav', window.location.origin);
-                window.open(url.toString(), '_blank');
-              }}
+              onClick={() => downloadWav()}
               title="Download pattern as WAV audio"
             >
               Download WAV
@@ -2573,18 +2470,10 @@ function App() {
                 height: '18px', margin: '0',
               }}
             />
-            <div className="status">
-              <span className={`status-indicator ${connected ? 'connected' : 'disconnected'}`} />
-              {connected ? 'Connected' : 'Disconnected'} · {sessionLabel}
-              {connected && connectedUsers.length > 0 && (
-                <span className="connected-users"> · {connectedUsers.join(', ')}</span>
-              )}
-            </div>
           </div>
         </div>
       </header>
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
-      {authError && <div className="auth-error-banner">{authError}</div>}
 
       <div className="app-content">
         <div className="app-main-left">

@@ -1,218 +1,101 @@
 # Discobot
 
-A Discord bot with a web-based UI for creating music using synthesis, sequencing, and drums. Control up to 3 independent synthesizers, a 16-step sequencer, piano roll editor, and drum machine from a web interface or Discord slash commands. Audio plays through the Discord voice channel in real time.
+A browser-based synthesizer, step sequencer and drum machine. Up to 3 independent synths, a 16/32-step sequencer, piano roll editor, drum machine and shared effects loop — all running in your browser with the Web Audio API. There is no server, account or login: open the page and play.
 
 ## Features
 
 - **Multi-Synth**: Up to 3 independent synthesizers, each with own sequencer, keyboard, and parameter controls
 - **16/32-step Sequencer**: Step grid with note assignment via piano keyboard, monophonic mode, per-step velocity
 - **Piano Roll Editor**: Per-synth keyboard/piano-roll toggle with click/drag note painting on the shared step pattern
-- **Synthesizer**: 4 waveforms (sine, square, sawtooth, triangle), detune, resonant lowpass filter, ADSR envelope, dual LFOs (pitch/filter targets), arpeggiator (7 modes), synth model selector (6 vintage models), presets (save/load/delete with local storage persistence)
-- **Octave Shift**: -1 to +1 octave range per synth with range display
-- **Shared Effects Loop**: Drive (waveshaper), phaser, delay, reverb (convolver) — per-synth send levels, master on/off, per-effect toggles
-- **Drum Machine**: 8 instruments (kick, snare, open/closed hi-hat, ride, crash, snare 2, clap), 16-step toggle grid with per-instrument volume/tone/extra controls, 3 kit variants (clean-analog, punchy-modern, lofi-dirty), master volume, per-instrument mute/solo, drum FX sends, and drum loop return
-- **MIDI Input**: Web MIDI device selection with `live`, `record`, and `step` routing modes per synth
-- **MIDI Export**: Standard MIDI File download with tempo meta event, multi-synth lanes, drums on channel 10
-- **Undo/Redo**: Per-pattern undo stack for note/velocity/parameter edits, keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z)
-- **Browser Audio**: Web Audio API feedback for synth and drums with shared effects loop, independent mute toggle
-- **Discord Audio Streaming**: Pattern rendered to 48kHz PCM with soft-clipped master mix, sent over WebSocket, played through bot voice connection with loop
-- **Pattern Persistence**: Save/load/delete patterns with name, stores all synth params, drum state, effects loop, and master volumes in `saved-patterns.json` under `PERSISTENCE_DIR` (fallback `DATA_DIR`, then local `data/`)
-- **Real-time Sync**: All connected clients stay synchronized via WebSocket
-- **Global Tempo**: Single BPM shared across all synths, editable LED display in header
-- **Auth System**: Discord OAuth2 login flow, session tokens with TTL, CSRF validation, HMAC-signed bot requests, role-based access (owner/collaborator/bot)
-- **Connected Users**: Real-time user presence display in header
-- **Header Controls**: "Discobot" title + active pattern badge, quick transport/save/load controls, MIDI panel, help modal, undo/redo, MIDI export, mute, and connection status
-- **Hybrid Control**: Web UI or Discord slash commands
+- **Synthesizer**: 4 waveforms, detune, resonant filter, ADSR envelope, dual LFOs (pitch/filter targets, tempo sync), arpeggiator (7 modes), 6 vintage synth models, stereo pan/spread, portamento, presets (saved in the browser)
+- **Shared Effects Loop**: Drive, phaser, delay, reverb — per-synth send levels, master on/off, per-effect toggles
+- **Drum Machine**: 8 instruments, 16-step grid with per-step velocity, per-instrument volume/tone/extra/tune/pan, 8 kits (3 generic + TR-808, TR-909, LinnDrum, Oberheim DMX, TR-707), mute/solo, swing, drum FX sends
+- **MIDI Input**: Web MIDI device selection with `live`, `record`, and `step` routing modes per synth (Chromium-based browsers)
+- **MIDI Import/Export**: Load .mid files with track selection; export a Standard MIDI File with multi-synth lanes and drums on channel 10
+- **WAV Export**: Render one bar of the full mix (synths, drums, effects) to a 48 kHz stereo WAV, entirely in the browser
+- **Undo/Redo**: Per-pattern undo stack (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z)
+- **Saved Patterns**: Save/load/delete full patterns (all synths, drums, kit, effects, tempo) in the browser's local storage
+- **Session Autosave**: The current session is kept in local storage, so a reload picks up where you left off
 
 ## Architecture
 
-Monorepo using npm workspaces with 4 packages:
+Monorepo using npm workspaces with 2 packages:
 
 ```
 discobot/
-├── bot/       # Discord bot (Discord.js, @discordjs/voice)
-├── engine/    # Custom math-based audio synthesis (no Tone.js)
-│   ├── Synthesizer           # Oscillator, filter, ADSR, dual LFOs
-│   ├── DrumSynthesizer       # 8 drum instruments, 3 kit variants
-│   ├── Sequencer / SequencerV2  # Pattern playback
-│   ├── Streaming             # DiscordAudioStreamer for voice
-│   ├── AudioExporter         # WAV export
-│   ├── AudioContextManager   # Singleton context management
-│   ├── utils.ts              # Shared utilities (clamp, noteToFreq, deepMerge)
-│   ├── constants.ts          # Audio parameters (no magic numbers)
-│   └── errors.ts             # Result type, error classes, validation
-├── web/       # Express API + WebSocket server, multi-synth backend, auth
-└── ui/        # React web interface (Vite), SynthUnit, PianoRoll, MidiPanel, EffectsPanel
+├── engine/    # Pure-TypeScript audio math (no Node or DOM dependencies)
+│   ├── Synthesizer           # Oscillator, filter, ADSR, dual LFOs, note rendering
+│   ├── DrumSynthesizer       # 8 drum instruments, kit variants, pattern rendering
+│   ├── Sequencer / SequencerV2  # Pattern step clocks
+│   ├── StreamingSynth        # Chunked polyphonic renderer
+│   ├── utils / constants / errors / types
+└── ui/        # React + Vite app
+    ├── src/localBackend.ts   # In-browser app state, "API" routes, saved patterns, WAV export
+    ├── src/hooks/            # Web Audio playback, MIDI input, backend subscription
+    └── src/components/       # Sequencer, keyboard, piano roll, synth controls, drums, FX, mixer
 ```
 
-**Audio Flow**: Engine renders PCM → Web Server base64-encodes → WebSocket → Bot plays through Discord voice (48kHz stereo 16-bit raw PCM)
-
-### Code Quality Features
-
-- **Singleton AudioContext**: Prevents memory leaks and "Too many contexts" errors
-- **Shared Utilities**: Single source of truth for audio calculations
-- **Named Constants**: All magic numbers replaced with descriptive constants
-- **Deep Merge**: Proper nested parameter updates
-- **Type Safety**: Comprehensive TypeScript coverage across all packages, engine types as single source of truth
-- **Result Type Pattern**: `Result<T,E>` with `Ok`/`Err` for expected failures
-- **Structured Error Logging**: All errors logged with context, no silent failures
+`ui/src/localBackend.ts` holds the app state that used to live on the server. Components call `apiFetch('/drum/step', …)` with the same paths and JSON the old REST API used, and receive the same event messages (`sequencerStep`, `patternUpdated`, …) the WebSocket used to deliver, so the UI code is unchanged apart from the transport.
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 18+ and npm
-- A Discord server where you can add bots
-
-### 1. Install
+Prerequisites: Node.js 18+ and npm.
 
 ```bash
-cd discobot
 npm install
+npm run dev        # http://localhost:3000
 ```
 
-### 2. Discord Bot Setup
-
-1. Go to https://discord.com/developers/applications
-2. **New Application** → name it
-3. **Bot** tab → **Add Bot** → copy token
-4. Enable **Server Members Intent** + **Message Content Intent**
-5. **OAuth2 → URL Generator**:
-   - Scopes: `bot`, `applications.commands`
-   - Permissions: `Connect`, `Speak`, `Use Voice Activity`, `Send Messages`
-6. Open the generated URL and invite the bot to your server
-
-### 3. Configure
+Production build:
 
 ```bash
-cp .env.example .env
+npm run build      # outputs ui/dist — a static site
+npm run preview    # serve the build locally
 ```
 
-Edit `.env`:
-```env
-DISCORD_TOKEN=your_bot_token
-DISCORD_CLIENT_ID=your_application_id
-AUTH_MODE=strict
-AUTH_TOKEN_SECRET=replace_with_long_random_secret
-BOT_SHARED_SECRET=replace_with_long_random_secret
+`ui/dist` is plain static files with relative paths, so it can be hosted anywhere (GitHub Pages, Netlify, any static host, or opened from a subfolder).
 
-# Optional: deploy-safe saved pattern storage directory
-PERSISTENCE_DIR=/data
-```
+### GitHub Pages
 
-### 4. Run
+`.github/workflows/deploy-pages.yml` builds and publishes the site on every push to `main`. Enable it once in the repo under **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
-```bash
-npm run dev
-```
+## Using it
 
-Starts:
-- Web API on http://localhost:3001
-- WebSocket on ws://localhost:3001/ws
-- Web UI on http://localhost:3000
-- Discord bot (connects to Discord)
+1. Open the page and click once anywhere so the browser allows audio.
+2. Click a step on a synth lane (it turns amber), then click a piano key to place a note — or switch to the piano roll and paint.
+3. Program drum hits in the drum grid, choose a kit, and shape each lane.
+4. Press **Play All** / **Stop All**. Set tempo by clicking the BPM display.
+5. **+ Save** stores the whole pattern in this browser; **Load** recalls it.
 
-### 5. Use It
-
-1. Open http://localhost:3000
-2. Join a voice channel in Discord
-3. In Discord: `/join`
-4. In Discord: `/login` — open the generated link in your browser
-5. In the UI: click a step button (amber = selected), click a piano key to assign a note, click Play
-6. The bot plays the pattern through your voice channel
-
-## Discord Commands
-
-| Command | Description |
-|---------|-------------|
-| `/join` | Join your current voice channel |
-| `/leave` | Leave voice channel |
-| `/play [synth]` | Start sequencer playback (optional synth: 1, 2, or 3) |
-| `/stop [synth]` | Stop playback (optional synth: 1, 2, or 3) |
-| `/note <note> [synth]` | Play a single note (optional synth: 1, 2, or 3) |
-| `/tempo <bpm>` | Set global tempo |
-| `/preset` | Cycle through synth presets |
-| `/status` | Show bot status |
-| `/help` | Show available commands |
-| `/login` | DM a link to authenticate with the web UI |
-
-## Web UI
-
-- **Header**: title/badge, editable BPM LED, Play/Stop All, Save/Load, MIDI panel (device/mode/channel/synth routing), Help, Undo/Redo, Export MIDI, reset/mute, connection status, connected users
-- **Synth Units**: Each contains sequencer + synth controls + keyboard/piano-roll, stacked vertically in a 2-column grid
-- **Sequencer grid**: 16 or 32 steps, click to select (amber), piano key assigns note (blue), per-step velocity
-- **Keyboard/Piano Roll panel**: Per-synth mode toggle between 3-octave keyboard (with octave shift/range display) and piano roll editor on shared step data
-- **Synth controls**: Oscillator, filter, envelope, dual LFOs, FX sends, arpeggiator (7 modes), synth model selector (6 vintage models), octave shift, presets, hold mode
-- **Effects Panel**: Shared effects loop with drive, phaser, delay, reverb — per-effect on/off toggles, master bypass
-- **Drum machine**: 8×16 toggle grid with instrument selection, per-instrument volume/tone/extra knobs, per-instrument mute/solo, 3 kit variants, master volume knob, drum FX sends (reverb/delay/drive/phaser), and drum loop return controls
-- **Save/Load/Manage**: Save from header, load from dropdown (5 recent + show all), delete from modal
-- **Browser mute**: Toggle browser audio without affecting Discord
-- **Reset**: Clear pattern + reset synth + reset drums
+Saved patterns and the autosaved session live in the browser's local storage: they're per browser and per device, and clearing site data removes them. Use **Export MIDI** or **Download WAV** to take work elsewhere.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Bot | Discord.js v14, @discordjs/voice |
-| Engine | Custom math synthesis (no Tone.js) |
-| API | Express, WebSocket (ws) |
-| UI | React, Vite, TypeScript |
-| Language | TypeScript across entire stack |
-
-## Development
-
-```bash
-npm run dev          # Run everything
-npm run dev:bot      # Discord bot only
-npm run dev:web      # API + WebSocket server only
-npm run dev:ui       # Web UI only (Vite)
-```
+| Engine | Custom math synthesis (TypeScript, no Tone.js) |
+| UI | React 18, Vite 5, TypeScript |
+| Audio | Web Audio API (AudioWorklet synth, buffer-rendered drums) |
+| Storage | Browser local storage |
 
 ## Additional Documentation
 
-- Guides: `/docs/guides` — setup, deployment, feature testing, Railway hosting
-- Plans: `/docs/plans` — implementation plans for piano roll, MIDI controller, effects loop, synth models, drum sample replacement
-- Reports: `/docs/reports` — performance, error handling, refactoring summaries
-- Reviews: `/docs/reviews` — code review
-- Reference notes: `/docs/reference` — AI development guide, audio streaming code
+- Guides: `/docs/guides` — setup, feature testing
+- Plans, reports and reviews in `/docs` are historical records; several describe the earlier Discord-bot version.
 
-## Status
+## Known Limitations
 
-### Working
-- Multi-synth support (up to 3 independent units, Synth 1 cannot be removed)
-- 16/32-step sequencer with visual indicator lights and per-step velocity
-- Piano roll editor with click/drag note painting
-- Piano keyboard with octave shift, responsive scaling, hold mode
-- Synth controls with real-time parameter updates: oscillator, filter, ADSR, dual LFOs, arpeggiator (7 modes), synth model selector (6 vintage models), presets
-- Shared effects loop: drive, phaser, delay, reverb with per-synth send levels
-- Drum machine with 8 instruments, 3 kit variants, 16-step toggle grid, per-instrument controls, mute/solo, master volume, drum FX sends
-- Drum browser preview on cell click
-- Drum playback during sequencer playback in both browser and Discord
-- Pattern save/load/delete (JSON persistence) — stores all synth params, drum state, drum kit, effects loop, and master volumes
-- Discord voice playback (full pattern rendered, soft-clipped master mix, looped)
-- Discord bot synth selection (/play, /stop, /note, /tempo accept synth option)
-- Stop in UI stops bot playback
-- Global tempo with live BPM updates across all synths
-- Browser audio with synth and drum parameter respect, shared effects bus
-- Multi-client WebSocket sync with connected user display
-- Undo/redo for pattern, velocity, synth param, and drum edits
-- MIDI export (Standard MIDI File, multi-synth lanes, drums on channel 10)
-- MIDI input (Web MIDI API, device selector, live/record/step modes)
-- Reset button
-- Auth sessions + CSRF validation + request rate limiting
-- Discord OAuth2 login flow
-
-### Needs Work
-- Step-by-step real-time streaming (currently renders full pattern)
-- `SamplePlayer` is a stub, not functional
-- Audio export / WAV download (engine has `AudioExporter`, not wired to UI)
-- Song mode / pattern chaining
-- Voice polyphony
-- Per-step drum velocity
+- Web MIDI isn't available in Firefox or Safari
+- `SamplePlayer` in the engine is a stub
+- No multi-user sync: each browser has its own session
+- Song mode / pattern chaining not implemented
 
 ---
 
 ## Changelog
+
+### 2.0 — Browser-only
+Removed the Discord bot, Discord login, voice streaming and the Express/WebSocket server. The app now runs entirely in the browser: state and endpoints moved into `ui/src/localBackend.ts`, saved patterns and the working session persist in local storage, and WAV export renders in the browser. The build is a static site deployable to GitHub Pages.
 
 ### PR #47 — Auto-update documentation on PR create
 CI workflow added to automatically stage and commit updated markdown docs when PRs are opened. Ensures documentation stays in sync with code changes.

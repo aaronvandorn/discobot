@@ -113,31 +113,9 @@
   background: #2563eb;
 }
 
-.status {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-  max-width: 20rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-.connected-users {
-  color: #00d4ff;
-}
 
-.status-indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ef4444;
-}
 
-.status-indicator.connected {
-  background: #22c55e;
-}
 
 .app-content {
   display: grid;
@@ -480,14 +458,6 @@
   max-width: 160px;
 }
 
-.auth-error-banner {
-  padding: 0.35rem 0.7rem;
-  background: rgba(239, 68, 68, 0.12);
-  border-top: 1px solid rgba(239, 68, 68, 0.45);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.45);
-  color: #fecaca;
-  font-size: 0.75rem;
-}
 
 @media (max-width: 1380px) {
   .app-content {

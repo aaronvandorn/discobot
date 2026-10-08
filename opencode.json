@@ -5,30 +5,28 @@
   "default_agent": "general",
   "logLevel": "INFO",
   "share": "disabled",
-  
   "skills": {
-    "paths": [".opencode/skills"]
+    "paths": [
+      ".opencode/skills"
+    ]
   },
-  
   "references": {
     "discobot": {
       "path": ".",
-      "description": "Discord Synth Bot project for music creation with Web UI and Discord integration"
+      "description": "Discobot: browser-based synth, sequencer and drum machine (React + Vite, custom audio engine)"
     }
   },
-  
   "agent": {
     "discobot-developer": {
-      "description": "Helps develop, debug, and enhance the Discord Synth Bot with web UI and audio synthesis features",
+      "description": "Helps develop, debug, and enhance Discobot, the browser-based synth/sequencer/drum machine",
       "mode": "subagent",
       "model": "anthropic/claude-sonnet-4-6"
     }
   },
-  
   "command": {
     "dev": {
       "description": "Start development environment for discobot",
-      "template": "Start all services in the discobot monorepo. Use this when you need to run the Discord bot, web API server, WebSocket server, and React UI together. The command should start: 1) Discord bot (connects to Discord), 2) Web API Server on http://localhost:3001, 3) WebSocket Server on ws://localhost:8080, 4) Web UI on http://localhost:3000. How to properly run this?"
+      "template": "Start the Discobot dev server with `npm run dev` (Vite on http://localhost:3000). There is no backend server or bot to start."
     }
   }
 }

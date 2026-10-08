@@ -1,5 +1,7 @@
 # Discobot - AI Development Guide
 
+> **Historical.** This guide describes the pre-2.0 Discord-bot architecture (bot/web/ui workspaces, WebSocket server, voice streaming). Discobot is now browser-only; see `AGENTS.md` and `README.md` for the current architecture.
+
 This document is for AI assistants who will be working on this project in the future.
 
 ## Project Overview
@@ -286,7 +288,7 @@ try {
 
 **Use Result<T, E> pattern for expected failures:**
 ```typescript
-import { Result, Ok, Err, validateRange } from '@discord-synth/engine';
+import { Result, Ok, Err, validateRange } from '@discobot/engine';
 
 function processValue(val: number): Result<number, ValidationError> {
   const validated = validateRange(val, 0, 100, 'value');

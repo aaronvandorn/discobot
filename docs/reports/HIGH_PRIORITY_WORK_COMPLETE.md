@@ -73,7 +73,7 @@ Successfully completed all three high-priority refactoring items identified in t
 ### Migration
 ```typescript
 // To use the new sequencer:
-import { SequencerV2 as Sequencer } from '@discord-synth/engine';
+import { SequencerV2 as Sequencer } from '@discobot/engine';
 
 // Or keep both and feature flag:
 const sequencer = USE_V2 ? new SequencerV2(synth) : new Sequencer(synth);
@@ -217,7 +217,7 @@ Net: Smaller overall footprint when accounting for eliminated duplication
 1. Current code works as-is (backward compatible)
 2. To use new sequencer:
    ```typescript
-   import { SequencerV2 } from '@discord-synth/engine';
+   import { SequencerV2 } from '@discobot/engine';
    const sequencer = new SequencerV2(synth);
    ```
 3. All hooks are automatically used by App.tsx

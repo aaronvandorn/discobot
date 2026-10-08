@@ -271,7 +271,7 @@ export type {
   SavedPatternFull,
   Sample,
   AudioExportOptions,
-} from '@discord-synth/engine';
+} from '@discobot/engine';
 ```
 
 **Benefits**

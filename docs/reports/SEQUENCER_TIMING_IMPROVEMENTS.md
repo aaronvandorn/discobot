@@ -120,7 +120,7 @@ setTimeout(() => {
 ### Option 1: Replace Existing Sequencer
 ```typescript
 // web/src/index.ts
-import { SequencerV2 as Sequencer } from '@discord-synth/engine';
+import { SequencerV2 as Sequencer } from '@discobot/engine';
 ```
 
 ### Option 2: Feature Flag

@@ -325,7 +325,7 @@ export default function DrumMachine({
                   displayValue={Math.round(drumEffectsReturn * 100) + '%'}
                   parseInputValue={parsePercent}
                   onChange={onDrumEffectsReturnChange}
-                  title="Level of the drum loop return from Discord playback"
+                  title="Level of the drums in the shared effects loop return"
                 />
               </div>
               <div className="drum-global-mix">
