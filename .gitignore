@@ -7,14 +7,8 @@ dist/
 *.mp3
 samples/
 
-# Docker
-certbot/
 
 # Logs
 logs/
 
-# PM2
-.pm2/
 
-# User data
-saved-patterns.json
